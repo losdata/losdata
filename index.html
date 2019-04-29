@@ -1,0 +1,390 @@
+<html>
+<head>
+<title>Unit Positioning Tool</title>
+<style>
+textarea {
+    font-family: monospace;
+}
+table {
+    border-collapse: collapse;
+}
+td,th {
+    vertical-align: top;
+    border: 1px black solid;
+}
+
+table.map td {
+    width: 30px; 
+    height: 30px;
+    text-align:center;
+    /*padding: 10px;*/
+}
+
+table.map td.boss {
+    background-color: #000;
+} 
+table.map td.sunportal_open {
+    background-color: orange;
+}
+table.map td.sunportal_closed {
+    background-color: #ccc;
+}
+table.map td.your_side {
+    border: none;
+}
+.label_defence {
+    color: #993333;
+}
+.label_sun {
+    color: orange;
+}
+.navigation * {
+    padding: 2em;
+}
+#container {
+    border: 1px black solid;
+}
+#boss_layouts {
+    background: #aaa;
+    border: 1px black solid;
+}
+.hidden { display: none;}
+.visible { display: block;}
+</style>
+</head>
+<script>
+
+function generate_moves(num_turns, num_cols, max_hold, boss_pattern, boss_width, defence_pattern, sun_patterns, turn, sun_behind_by_col) {
+    ret_by_hold = {
+        'sun': [],
+        'boss': [],
+        'defence': []       
+    }
+    ret_by_cols = {
+        'sun': [],
+        'boss': [],
+        'defence': []
+    };
+    for (var j in ret_by_cols) {
+        for (var i = 0; i < num_cols; i++) {
+            ret_by_cols[j].push([]);
+        }
+        for (var i = 0; i < max_hold; i++) {
+            ret_by_hold[j].push([]);
+        }
+    }
+    for (var hold = 1; hold <= max_hold; hold++) { 
+        generate_attack_move_helper(ret_by_cols, boss_pattern, turn, num_turns, hold, boss_width, 'boss', 'boss');
+        for (var i = 0; i < sun_patterns.length; i++) {
+            generate_attack_move_helper(ret_by_cols, sun_patterns[i], turn, num_turns, hold, 1, 'sun', 'sun portal');
+        }
+        generate_defence_move_helper(ret_by_cols, defence_pattern, turn, num_turns, hold, boss_width, 'defence', 'defence');
+    }
+
+    remove_overlapping(ret_by_cols, num_cols, sun_patterns, turn, sun_behind_by_col, max_hold, boss_width);
+    reindex_by_holds(ret_by_hold, ret_by_cols, num_cols);
+    return [ret_by_hold, ret_by_cols];
+}
+
+function generate_attack_move_helper(ret_by_cols, pattern, turn, num_turns, hold, enemy_width, type, enemy_name) {
+    var posn = parseInt(pattern.charAt((turn + hold) % pattern.length));
+    if (!isNaN(posn)) {
+        var placement_range_text = (enemy_width == 1) ? posn : 
+            posn + "," + (posn + enemy_width - 1);
+        for (var i = 0; i < enemy_width; i++) { 
+            if (turn + hold < num_turns && !ret_by_cols[type][posn - 1 + i].includes(hold)) {
+                ret_by_cols[type][posn - 1 + i].push(hold);
+            }
+        }
+    }   
+}
+
+function generate_defence_move_helper(ret_by_cols, pattern, turn, num_turns, hold, enemy_width, type, enemy_name) { 
+    if (hold == 0 || pattern.length == 0) {
+        return;
+    }
+    for (var lookahead = 0; lookahead  < hold; lookahead++) {
+        var posn = parseInt(pattern.charAt((turn + lookahead) % pattern.length));
+        if (!isNaN(posn)) {
+            var placement_range_text = (enemy_width == 1) ? posn : 
+                posn + "," + (posn + enemy_width - 1);
+            for (var i = 0; i < enemy_width; i++) { 
+                if (turn + lookahead < num_turns && !ret_by_cols[type][posn - 1 + i].includes(hold)) {
+                    ret_by_cols[type][posn - 1 + i].push(hold);
+                }
+            }
+        }            
+    }
+}
+
+function remove_overlapping(ret_by_cols, num_cols, sun_patterns, turn, sun_behind_by_col, max_hold, enemy_width) { 
+    if (!(ret_by_cols['sun'] && ret_by_cols['boss'] && sun_patterns.length > 0)) { 
+        return;
+    }
+    for (var col = 0; col < num_cols; col++) {
+        for (var hold = 1; hold <= max_hold; hold++) {
+            for (var i = 0; i < enemy_width; i++) { 
+                if (col + i >= num_cols) { 
+                    break;
+                }
+
+                // cases:
+                // - sun open: remove depending on boss or sun in front
+                // - sun closed: remove if sun in front 
+
+                // open
+                if (!isNaN(sun_patterns[0].charAt((turn + hold) % sun_patterns[0].length))) { 
+                    if (ret_by_cols['sun'][col + i].includes(hold) && ret_by_cols['boss'][col + i].includes(hold)) { 
+                        if (sun_behind_by_col[col + i]) {
+                            ret_by_cols['sun'][col + i] = ret_by_cols['sun'][col + i].filter(x => x != hold);
+                        } else {
+                            ret_by_cols['boss'][col + i] = ret_by_cols['boss'][col + i].filter(x => x != hold);
+                        }
+                    }
+                } else { // closed
+                    if (ret_by_cols['boss'][col + i].includes(hold)) { 
+                        if ((col + i) in sun_behind_by_col && !sun_behind_by_col[col + i]) {
+                            ret_by_cols['boss'][col + i] = ret_by_cols['boss'][col + i].filter(x => x != hold);
+                        }
+                    }
+                }       
+            }
+        }
+    }
+}
+
+function reindex_by_holds(ret_by_hold, ret_by_cols, num_cols, enemy_width) {
+    for (var col = 0; col < num_cols; col++) {
+        for (var type in ret_by_cols) {
+            for (var j = 0; j < ret_by_cols[type][col].length; j++) {
+                var hold = ret_by_cols[type][col][j];
+                ret_by_hold[type][hold - 1].push(col + 1);
+            }
+        }
+    }
+}
+
+function generate_sun_portal_row(dest_sun_portal_row, sun_patterns, num_cols, sun_pattern_posns, turn, is_behind, sun_behind_by_col) {
+    for (var col = 0; col < num_cols; col++) {
+        var cell = document.createElement('td');
+
+        for (var i = 0; i < sun_patterns.length; i++) {
+            if (!(col in sun_behind_by_col)) {
+                continue;
+            }
+            if (sun_behind_by_col[col] != is_behind) {
+                continue;
+            }
+            if (col + 1 == sun_pattern_posns[i]) {
+                if (!isNaN(parseInt(sun_patterns[i].charAt(turn % sun_patterns[i].length)))) {
+                    cell.className = 'sunportal_open';
+                } else {
+                    cell.className = 'sunportal_closed';
+                }
+            }
+        }
+        dest_sun_portal_row.appendChild(cell);
+    }    
+}
+
+function generate_map(dest_container, ret_by_cols, boss_pattern, defence_pattern, sun_patterns, sun_pattern_posns, num_cols, boss_width, turn, sun_behind_by_col) {
+    var map_table = document.createElement('table');
+    map_table.className = 'map';
+
+    // draw rows representing a square boss
+    var boss_row_fragment = document.createDocumentFragment();
+    var boss_row_root = document.createElement('tr');
+    for (var col = 0; col < num_cols; col++) {
+        var boss_row_cell = document.createElement('td');
+        var boss_posn = parseInt(boss_pattern.charAt(turn % boss_pattern.length));
+        if (!isNaN(boss_posn) && col + 1 >= boss_posn && col + 1 <= boss_posn + boss_width - 1) {
+            boss_row_cell.className = 'boss';
+        }
+        boss_row_root.appendChild(boss_row_cell);
+    }
+    for (var i = 0; i < boss_width; i++) { 
+        boss_row_fragment.appendChild(boss_row_root.cloneNode(true));
+    }
+
+    // draw sun portals (open or closed)
+    var sun_portal_row_behind = document.createElement('tr');
+    var sun_portal_row_front = document.createElement('tr');
+    generate_sun_portal_row(sun_portal_row_behind, sun_patterns, num_cols, sun_pattern_posns, turn, true, sun_behind_by_col);
+    generate_sun_portal_row(sun_portal_row_front, sun_patterns, num_cols, sun_pattern_posns, turn, false, sun_behind_by_col);
+
+    // draw 'your side'
+    var your_side_row = document.createElement('tr');
+    for (var col = 0; col < num_cols; col++) {
+        var cell = document.createElement('td');
+        cell.className = 'your_side';
+        for (var j in ret_by_cols) {
+            for (var i = 0; i < ret_by_cols[j][col].length; i++) { 
+                var div = document.createElement('div');
+                div.className = 'label_' + j;
+                div.textContent = ret_by_cols[j][col][i];
+                cell.appendChild(div);
+            }
+        }        
+        your_side_row.appendChild(cell);
+    }
+
+    map_table.appendChild(sun_portal_row_behind);
+    map_table.appendChild(boss_row_fragment);
+    map_table.appendChild(sun_portal_row_front);
+    map_table.appendChild(your_side_row);
+
+    dest_container.appendChild(map_table);
+}
+
+function generate_move_output() {
+    var pattern_lines = document.getElementById('pattern').value.split("\n");
+    var boss_pattern = "";
+    var defence_pattern = "";
+    var sun_patterns = [];
+    var num_turns = 12;
+    var num_cols = 8;
+    var max_hold = 3;
+    var boss_width = 2;
+    var sun_behind_by_col = {};
+    //var sun_behind = false;
+
+    for (var i = 0; i < pattern_lines.length; i++) {
+        var line_parts = pattern_lines[i].split(/\s+/);
+        if (!line_parts) {
+            continue;
+        }
+        var command_name = line_parts[0].toLowerCase();
+        if (command_name == '#') {
+            continue;
+        } else if (command_name == 'boss') {
+            boss_pattern = line_parts[1];
+        } else if (command_name == 'attack') { 
+            defence_pattern = line_parts[1];
+        } else if (command_name == 'sun') { 
+            sun_behind_by_col[parseInt(line_parts[2][0]) - 1] = (line_parts[1].toLowerCase() == 'behind');
+            sun_patterns.push(line_parts[2]);
+        } else if (line_parts[0].toLowerCase() == 'turnsleft') {
+            num_turns = parseInt(line_parts[1]);
+        }
+    }
+
+    var sun_pattern_posns = [];
+    for (var i = 0; i < sun_patterns.length; i++) {
+        sun_pattern_posns.push(-1);
+        for (var j = 0; j < sun_patterns[i].length; j++) {
+            var posn = parseInt(sun_patterns[i][j]);
+            if (!isNaN(posn)) {
+                sun_pattern_posns[i] = posn;
+                break;
+            }
+        }
+    }
+
+    var container = document.getElementById('container');
+    container.innerHTML = '';
+
+    for (var turn = 0; turn < num_turns; turn++) {
+        var move_info = generate_moves(num_turns, num_cols, max_hold, boss_pattern, boss_width, defence_pattern, sun_patterns, turn, sun_behind_by_col);
+        var ret_by_hold = move_info[0];
+        var ret_by_cols = move_info[1];
+
+        var container_this_turn = document.createElement('div');
+        container_this_turn.className = 'turn_container hidden';
+
+        var navigation = document.createElement('div');
+        navigation.className = 'navigation';
+        if (turn > 0) {
+            var back_link = document.createElement('button');
+            back_link.textContent = '<';
+            back_link.onclick = make_navigation_onclick(turn - 1); 
+            navigation.appendChild(back_link);
+        }
+        var turns_left = document.createElement('span');
+        turns_left.textContent = (num_turns - turn) + ' turns left';
+        navigation.appendChild(turns_left);
+        if (turn < num_turns - 1) {
+            var forward_link = document.createElement('button');
+            forward_link.textContent = '>';
+            forward_link.onclick = make_navigation_onclick(turn + 1); 
+            navigation.appendChild(forward_link);
+        }
+        container_this_turn.append(navigation);
+
+        var map_container = document.createElement('div');
+        generate_map(map_container, ret_by_cols, boss_pattern, defence_pattern, sun_patterns, sun_pattern_posns, num_cols, boss_width, turn, sun_behind_by_col); 
+        container_this_turn.append(map_container);
+        
+        for (var type in ret_by_hold) {
+            var type_container = document.createElement('div');
+            var type_title = document.createElement('p');
+            type_title.textContent = type;
+            type_title.className = 'label_' + type;
+            type_container.appendChild(type_title);
+
+            var positions_for_each_hold = document.createElement('ul');
+            for (var hold = 1; hold <= max_hold; hold++) { 
+                if (ret_by_hold[type][hold - 1].length == 0) { 
+                    continue;
+                }
+                var bullet_for_hold = document.createElement('li');
+                bullet_for_hold.textContent = hold + ' hold: positions ';
+                for (var i = 0; i < ret_by_hold[type][hold - 1].length; i++) {
+                    bullet_for_hold.textContent += ret_by_hold[type][hold - 1][i] + ' ';
+                }
+                positions_for_each_hold.appendChild(bullet_for_hold);
+            }
+            type_container.appendChild(positions_for_each_hold);
+            container_this_turn.appendChild(type_container);
+        }
+
+        container.appendChild(container_this_turn);
+    }
+    show_turn_container(0);
+}
+
+function make_navigation_onclick(number) { 
+    return function() { 
+        show_turn_container(number);
+    }
+}
+function show_turn_container(number) {
+    var turn_containers = document.getElementsByClassName('turn_container');
+    for (var i = turn_containers.length - 1; i >= 0; i--) {
+        if (i != number) {
+            turn_containers[i].className = 'turn_container hidden';
+        } else {
+            turn_containers[i].className = 'turn_container visible';
+        }
+    }
+}
+function toggle_boss_layouts() { 
+    var boss_layouts = document.getElementById('boss_layouts');
+    if (boss_layouts.className == 'hidden') {
+        boss_layouts.className = 'visible';
+    } else {
+        boss_layouts.className = 'hidden';
+    }
+}
+window.onload = function() { 
+    generate_move_output();
+};
+</script>
+<body>
+<h1>Unit Positioning Tool</h1><div style="clear:both" /></div>
+<p>Thanks to Saris</p>
+<div id="container">
+</div>
+<textarea id="pattern" cols="80" rows="10">
+Boss   44224466
+Attack -4-2-4-2
+Sun behind 33---
+Sun front 66---
+TurnsLeft 11
+
+# You can adjust the num. turns, sun portal... accordingly
+</textarea>
+<button id="generate" onclick="generate_move_output()">Generate</button>
+
+</body>
+
+</html>
